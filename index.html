@@ -145,9 +145,9 @@
       useEffect(() => {
         const loadData = async () => {
           try {
-            const posResult = await window.storage.get('positions');
-            const shiftResult = await window.storage.get('shifts');
-            const modeResult = await window.storage.get('subscription-mode');
+            const posResult = await localStorage.get('positions');
+            const shiftResult = await localStorage.get('shifts');
+            const modeResult = await localStorage.get('subscription-mode');
             
             if (posResult) setPositions(JSON.parse(posResult.value));
             if (shiftResult) setShifts(JSON.parse(shiftResult.value));
@@ -161,17 +161,17 @@
 
       const savePositions = async (newPositions) => {
         setPositions(newPositions);
-        await window.storage.set('positions', JSON.stringify(newPositions));
+        await localStorage.set('positions', JSON.stringify(newPositions));
       };
 
       const saveShifts = async (newShifts) => {
         setShifts(newShifts);
-        await window.storage.set('shifts', JSON.stringify(newShifts));
+        await localStorage.set('shifts', JSON.stringify(newShifts));
       };
 
       const saveMode = async (newMode) => {
         setMode(newMode);
-        await window.storage.set('subscription-mode', newMode);
+        await localStorage.set('subscription-mode', newMode);
       };
 
       const addPosition = () => {

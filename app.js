@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Clock, Briefcase, Calendar, Camera, Download, Plus, TrendingUp, X, Check, Crown, Share2 } from 'lucide-react';
-
+import localforage from "localforage";
 export default function WorkProofApp() {
   const [mode, setMode] = useState('free');
   const [view, setView] = useState('dashboard');
@@ -672,4 +672,5 @@ export default function WorkProofApp() {
       </div>
     </div>
   );
+
 }

@@ -44,13 +44,13 @@ export default function WorkProofApp() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const posResult = await window.storage.get('positions');
-        const shiftResult = await window.storage.get('shifts');
-        const modeResult = await window.storage.get('subscription-mode');
+        const posResult = await localforage.getItem('positions');
+        const shiftResult = await localforage.getItem('shifts');
+        const modeResult = await localforage.getItem('subscription-mode');
         
-        if (posResult) setPositions(JSON.parse(posResult.value));
-        if (shiftResult) setShifts(JSON.parse(shiftResult.value));
-        if (modeResult) setMode(modeResult.value);
+        if (posResult) setPositions(posResult);
+        if (shiftResult) setShifts(shiftResult);
+        if (modeResult) setMode(modeResult);
       } catch (error) {
         console.log('First time user - no data to load');
       }
@@ -60,17 +60,18 @@ export default function WorkProofApp() {
 
   const savePositions = async (newPositions) => {
     setPositions(newPositions);
-    await window.storage.set('positions', JSON.stringify(newPositions));
+    await localforage.setItem('positions', newPositions);
+
   };
 
   const saveShifts = async (newShifts) => {
     setShifts(newShifts);
-    await window.storage.set('shifts', JSON.stringify(newShifts));
+    await localforage.setItem('shifts', newShifts);
   };
 
   const saveMode = async (newMode) => {
     setMode(newMode);
-    await window.storage.set('subscription-mode', newMode);
+    await localforage.setItem('subscription-mode', newMode);
   };
 
   const addPosition = () => {
@@ -674,3 +675,4 @@ export default function WorkProofApp() {
   );
 
 }
+

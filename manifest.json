@@ -2,7 +2,9 @@
   "name": "WorkProof - Professional Hours Tracker",
   "short_name": "WorkProof",
   "description": "Track your work hours with timecard proof for your resume",
-  "start_url": "/",
+  "start_url": "./index.html",
+  "scope": "./",
+  
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#2563eb",

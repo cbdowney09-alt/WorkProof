@@ -1,7 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { Clock, Briefcase, Calendar, Camera, Download, Plus, TrendingUp, X, Check, Crown, Share2 } from 'lucide-react';
-import localforage from "localforage";
+import { Clock, Briefcase, Calendar, Camera, Download, Plus, TrendingUp, X, Check, Crown, Share2, LogOut, User, Lock, Mail } from 'lucide-react';
+
 export default function WorkProofApp() {
+  // Auth state
+  const [authView, setAuthView] = useState('login'); // 'login', 'signup', 'app'
+  const [currentUser, setCurrentUser] = useState(null);
+  const [authForm, setAuthForm] = useState({
+    email: '',
+    password: '',
+    confirmPassword: '',
+    name: ''
+  });
+  const [authError, setAuthError] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
+
+  // App state
   const [mode, setMode] = useState('free');
   const [view, setView] = useState('dashboard');
   const [positions, setPositions] = useState([]);
@@ -18,6 +31,179 @@ export default function WorkProofApp() {
     photoPreview: null
   });
 
+  // Check for existing session on mount
+  useEffect(() => {
+    checkSession();
+  }, []);
+
+  const checkSession = async () => {
+    try {
+      const sessionResult = await window.storage.get('current-user');
+      if (sessionResult) {
+        const user = JSON.parse(sessionResult.value);
+        setCurrentUser(user);
+        setAuthView('app');
+        await loadUserData(user.id);
+      }
+    } catch (error) {
+      console.log('No active session');
+    }
+  };
+
+  const loadUserData = async (userId) => {
+    try {
+      const positionsKey = `user-${userId}-positions`;
+      const shiftsKey = `user-${userId}-shifts`;
+      const modeKey = `user-${userId}-mode`;
+
+      const posResult = await window.storage.get(positionsKey);
+      const shiftResult = await window.storage.get(shiftsKey);
+      const modeResult = await window.storage.get(modeKey);
+
+      if (posResult) setPositions(JSON.parse(posResult.value));
+      if (shiftResult) setShifts(JSON.parse(shiftResult.value));
+      if (modeResult) setMode(modeResult.value);
+    } catch (error) {
+      console.log('No user data found, starting fresh');
+    }
+  };
+
+  const hashPassword = async (password) => {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(password);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  };
+
+  const handleSignup = async (e) => {
+    e.preventDefault();
+    setAuthError('');
+    setAuthLoading(true);
+
+    try {
+      // Validation
+      if (!authForm.email || !authForm.password || !authForm.name) {
+        throw new Error('All fields are required');
+      }
+
+      if (authForm.password !== authForm.confirmPassword) {
+        throw new Error('Passwords do not match');
+      }
+
+      if (authForm.password.length < 6) {
+        throw new Error('Password must be at least 6 characters');
+      }
+
+      // Check if user already exists
+      const userKey = `user-email-${authForm.email.toLowerCase()}`;
+      try {
+        const existingUser = await window.storage.get(userKey);
+        if (existingUser) {
+          throw new Error('An account with this email already exists');
+        }
+      } catch (error) {
+        // User doesn't exist, continue with signup
+      }
+
+      // Create user
+      const userId = Date.now().toString();
+      const hashedPassword = await hashPassword(authForm.password);
+      
+      const newUser = {
+        id: userId,
+        email: authForm.email.toLowerCase(),
+        name: authForm.name,
+        passwordHash: hashedPassword,
+        createdAt: new Date().toISOString()
+      };
+
+      // Store user data
+      await window.storage.set(userKey, JSON.stringify(newUser));
+      await window.storage.set(`user-id-${userId}`, JSON.stringify(newUser));
+      await window.storage.set('current-user', JSON.stringify(newUser));
+
+      setCurrentUser(newUser);
+      setAuthView('app');
+      setAuthForm({ email: '', password: '', confirmPassword: '', name: '' });
+    } catch (error) {
+      setAuthError(error.message);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setAuthError('');
+    setAuthLoading(true);
+
+    try {
+      if (!authForm.email || !authForm.password) {
+        throw new Error('Email and password are required');
+      }
+
+      // Get user by email
+      const userKey = `user-email-${authForm.email.toLowerCase()}`;
+      const userResult = await window.storage.get(userKey);
+      
+      if (!userResult) {
+        throw new Error('Invalid email or password');
+      }
+
+      const user = JSON.parse(userResult.value);
+      const hashedPassword = await hashPassword(authForm.password);
+
+      if (user.passwordHash !== hashedPassword) {
+        throw new Error('Invalid email or password');
+      }
+
+      // Set session
+      await window.storage.set('current-user', JSON.stringify(user));
+      setCurrentUser(user);
+      setAuthView('app');
+      await loadUserData(user.id);
+      setAuthForm({ email: '', password: '', confirmPassword: '', name: '' });
+    } catch (error) {
+      setAuthError(error.message);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await window.storage.delete('current-user');
+      setCurrentUser(null);
+      setAuthView('login');
+      setPositions([]);
+      setShifts([]);
+      setMode('free');
+      setView('dashboard');
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
+  };
+
+  // Save functions with user-specific keys
+  const savePositions = async (newPositions) => {
+    if (!currentUser) return;
+    setPositions(newPositions);
+    await window.storage.set(`user-${currentUser.id}-positions`, JSON.stringify(newPositions));
+  };
+
+  const saveShifts = async (newShifts) => {
+    if (!currentUser) return;
+    setShifts(newShifts);
+    await window.storage.set(`user-${currentUser.id}-shifts`, JSON.stringify(newShifts));
+  };
+
+  const saveMode = async (newMode) => {
+    if (!currentUser) return;
+    setMode(newMode);
+    await window.storage.set(`user-${currentUser.id}-mode`, newMode);
+  };
+
   // PWA Install Prompt
   useEffect(() => {
     const handler = (e) => {
@@ -32,47 +218,12 @@ export default function WorkProofApp() {
   const handleInstall = async () => {
     if (!deferredPrompt) return;
     deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
+    await deferredPrompt.userChoice;
     setDeferredPrompt(null);
     setShowInstallPrompt(false);
   };
 
-  // Check if app is installed
   const isInstalled = window.matchMedia('(display-mode: standalone)').matches;
-
-  // Load data from storage
-  useEffect(() => {
-    const loadData = async () => {
-      try {
-        const posResult = await localforage.getItem('positions');
-        const shiftResult = await localforage.getItem('shifts');
-        const modeResult = await localforage.getItem('subscription-mode');
-        
-        if (posResult) setPositions(posResult);
-        if (shiftResult) setShifts(shiftResult);
-        if (modeResult) setMode(modeResult);
-      } catch (error) {
-        console.log('First time user - no data to load');
-      }
-    };
-    loadData();
-  }, []);
-
-  const savePositions = async (newPositions) => {
-    setPositions(newPositions);
-    await localforage.setItem('positions', newPositions);
-
-  };
-
-  const saveShifts = async (newShifts) => {
-    setShifts(newShifts);
-    await localforage.setItem('shifts', newShifts);
-  };
-
-  const saveMode = async (newMode) => {
-    setMode(newMode);
-    await localforage.setItem('subscription-mode', newMode);
-  };
 
   const addPosition = () => {
     if (newPosition.trim()) {
@@ -187,15 +338,168 @@ export default function WorkProofApp() {
 
   const weeks = getWeeks();
 
-  // iOS Share instruction for install
   const showIOSInstallInstructions = () => {
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
     return isIOS && !isInstalled;
   };
 
+  // Auth screens
+  if (authView === 'login' || authView === 'signup') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center p-4">
+        <div className="max-w-md w-full">
+          <div className="text-center mb-8">
+            <div className="bg-gradient-to-br from-blue-600 to-blue-700 p-4 rounded-2xl shadow-lg inline-block mb-4">
+              <Clock className="text-white" size={48} />
+            </div>
+            <h1 className="text-4xl font-bold text-slate-900 mb-2">WorkProof</h1>
+            <p className="text-slate-600">Track your work hours professionally</p>
+          </div>
+
+          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
+            <div className="flex border-b border-slate-200">
+              <button
+                onClick={() => {
+                  setAuthView('login');
+                  setAuthError('');
+                  setAuthForm({ email: '', password: '', confirmPassword: '', name: '' });
+                }}
+                className={`flex-1 py-4 font-semibold transition-colors ${
+                  authView === 'login'
+                    ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50'
+                    : 'text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                Login
+              </button>
+              <button
+                onClick={() => {
+                  setAuthView('signup');
+                  setAuthError('');
+                  setAuthForm({ email: '', password: '', confirmPassword: '', name: '' });
+                }}
+                className={`flex-1 py-4 font-semibold transition-colors ${
+                  authView === 'signup'
+                    ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50'
+                    : 'text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                Sign Up
+              </button>
+            </div>
+
+            <div className="p-8">
+              {authError && (
+                <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4">
+                  <p className="text-red-700 text-sm">{authError}</p>
+                </div>
+              )}
+
+              <form onSubmit={authView === 'login' ? handleLogin : handleSignup} className="space-y-4">
+                {authView === 'signup' && (
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">
+                      Full Name
+                    </label>
+                    <div className="relative">
+                      <User className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+                      <input
+                        type="text"
+                        value={authForm.name}
+                        onChange={(e) => setAuthForm({ ...authForm, name: e.target.value })}
+                        className="w-full pl-11 pr-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="Enter your name"
+                        required={authView === 'signup'}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Email
+                  </label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+                    <input
+                      type="email"
+                      value={authForm.email}
+                      onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })}
+                      className="w-full pl-11 pr-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="your@email.com"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Password
+                  </label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+                    <input
+                      type="password"
+                      value={authForm.password}
+                      onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })}
+                      className="w-full pl-11 pr-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="••••••••"
+                      required
+                    />
+                  </div>
+                </div>
+
+                {authView === 'signup' && (
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">
+                      Confirm Password
+                    </label>
+                    <div className="relative">
+                      <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+                      <input
+                        type="password"
+                        value={authForm.confirmPassword}
+                        onChange={(e) => setAuthForm({ ...authForm, confirmPassword: e.target.value })}
+                        className="w-full pl-11 pr-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="••••••••"
+                        required={authView === 'signup'}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={authLoading}
+                  className="w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white py-3 rounded-lg font-semibold hover:from-blue-700 hover:to-blue-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+                >
+                  {authLoading ? 'Processing...' : authView === 'login' ? 'Login' : 'Create Account'}
+                </button>
+              </form>
+            </div>
+          </div>
+
+          <p className="text-center text-sm text-slate-600 mt-6">
+            {authView === 'login' ? "Don't have an account? " : "Already have an account? "}
+            <button
+              onClick={() => {
+                setAuthView(authView === 'login' ? 'signup' : 'login');
+                setAuthError('');
+                setAuthForm({ email: '', password: '', confirmPassword: '', name: '' });
+              }}
+              className="text-blue-600 hover:underline font-medium"
+            >
+              {authView === 'login' ? 'Sign up' : 'Login'}
+            </button>
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Main app (rest of your original code with logout button added)
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
-      {/* PWA Install Banner */}
       {showInstallPrompt && (
         <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-4 py-3 shadow-lg">
           <div className="max-w-6xl mx-auto flex items-center justify-between">
@@ -226,7 +530,6 @@ export default function WorkProofApp() {
         </div>
       )}
 
-      {/* iOS Install Instructions */}
       {showIOSInstallInstructions() && !showInstallPrompt && (
         <div className="bg-gradient-to-r from-purple-600 to-purple-700 text-white px-4 py-3">
           <div className="max-w-6xl mx-auto">
@@ -243,7 +546,6 @@ export default function WorkProofApp() {
         </div>
       )}
 
-      {/* Header */}
       <div className="bg-white shadow-sm border-b border-slate-200">
         <div className="max-w-6xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
@@ -253,25 +555,33 @@ export default function WorkProofApp() {
               </div>
               <div>
                 <h1 className="text-2xl font-bold text-slate-900">WorkProof</h1>
-                <p className="text-sm text-slate-500">Professional Hours Tracking</p>
+                <p className="text-sm text-slate-500">Welcome, {currentUser?.name}</p>
               </div>
             </div>
-            <button
-              onClick={() => saveMode(mode === 'free' ? 'premium' : 'free')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${
-                mode === 'premium'
-                  ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-white shadow-lg'
-                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-              }`}
-            >
-              <Crown size={18} />
-              {mode === 'premium' ? 'Premium' : 'Upgrade'}
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => saveMode(mode === 'free' ? 'premium' : 'free')}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${
+                  mode === 'premium'
+                    ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-white shadow-lg'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                <Crown size={18} />
+                {mode === 'premium' ? 'Premium' : 'Upgrade'}
+              </button>
+              <button
+                onClick={handleLogout}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors"
+              >
+                <LogOut size={18} />
+                Logout
+              </button>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Navigation */}
       <div className="bg-white border-b border-slate-200">
         <div className="max-w-6xl mx-auto px-4">
           <div className="flex gap-1 overflow-x-auto">
@@ -301,11 +611,9 @@ export default function WorkProofApp() {
         </div>
       </div>
 
-      {/* Main Content */}
       <div className="max-w-6xl mx-auto px-4 py-8 pb-24">
         {view === 'dashboard' && (
           <div className="space-y-6">
-            {/* Stats Cards */}
             <div className="grid md:grid-cols-3 gap-4">
               <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
                 <div className="flex items-center justify-between">
@@ -344,7 +652,6 @@ export default function WorkProofApp() {
               </div>
             </div>
 
-            {/* Hours by Position */}
             {positions.length > 0 && (
               <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
                 <h2 className="text-lg font-semibold text-slate-900 mb-4">Hours by Position</h2>
@@ -359,14 +666,13 @@ export default function WorkProofApp() {
               </div>
             )}
 
-            {/* Weekly View */}
             {weeks.length > 0 && (
               <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                 <div className="bg-slate-50 px-6 py-4 border-b border-slate-200">
                   <h2 className="text-lg font-semibold text-slate-900">Weekly Breakdown</h2>
                 </div>
                 <div className="divide-y divide-slate-200">
-                  {weeks.map((week, idx) => (
+                  {weeks.map((week) => (
                     <div key={week.key} className="p-6">
                       <div className="flex items-center justify-between mb-4">
                         <h3 className="font-semibold text-slate-900">
@@ -564,7 +870,7 @@ export default function WorkProofApp() {
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
               <div className="bg-gradient-to-r from-purple-600 to-purple-700 px-6 py-8 text-white">
                 <h2 className="text-2xl font-bold mb-2">Job Positions</h2>
-                <p className="text-purple-100">Manage the roles you work at Cookout</p>
+                <p className="text-purple-100">Manage the roles you work</p>
               </div>
 
               <div className="p-6 space-y-6">
@@ -673,6 +979,4 @@ export default function WorkProofApp() {
       </div>
     </div>
   );
-
 }
-

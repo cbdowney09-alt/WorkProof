@@ -47,19 +47,30 @@
     And ensure you have created the following tables in your Supabase project:
       - profiles (id PK uuid, full_name text, mode text) or upsert via auth metadata
       - positions (id text PK, user_id uuid, name text, created_at timestamp)
-      - shifts (id text PK, user_id uuid, position_id text, date date, start_time text, end_time text, hours numeric, photo_url text, created_at timestamp)
+      - shifts (id text PK, user_id uuid, position_id text, d  ate date, start_time text, end_time text, hours numeric, photo_url text, created_at timestamp)
     Also create a Storage bucket (e.g., 'timecard-photos') to store uploaded photos if you want images saved server-side.
   -->
 
   <script type="text/babel">
-    const { useState, useEffect, useRef } = React;
-
+    const { createClient } = window.supabase;
+    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     /******************************
      * CONFIG - INSERT YOUR KEYS
      ******************************/
     // Replace these placeholders with your actual Supabase URL and anon public key
-    const supabase = window.supabase;
+    
+    const SUPABASE_URL = "https://lypnzomzrppvzqiobkcp.supabase.co";
+    const SUPABASE_ANON_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx5cG56b216cnBwdnpxaW9ia2NwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI5NzUxMzAsImV4cCI6MjA3ODU1MTEzMH0.URm48DLZUzxWmAe8n_aHXFjdNZj-z4RWOTSf9G5bnlQ";
+    
+// ✅ create the Supabase client globally
+    const supabaseJs = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+    if (!supabaseJs) {
+  console.error("❌ Supabase failed to initialize — check your script order.");
+} else {
+  console.log("✅ Supabase initialized");
+}
     /******************************
      * Helper: localforage wrappers
      ******************************/

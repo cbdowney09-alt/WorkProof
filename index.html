@@ -8,146 +8,160 @@
   <meta name="apple-mobile-web-app-title" content="WorkProof" />
   <meta name="description" content="Track your work hours with timecard proof for your resume" />
   <meta name="theme-color" content="#2563eb" />
+  <script type="module" src="./supabase.js"></script>
+
   <title>WorkProof - Professional Hours Tracker</title>
 
-  <!-- PWA manifest + icons preserved -->
+  <!-- PWA manifest + icons (relative paths so GitHub Pages works) -->
   <link rel="manifest" href="manifest.json" />
   <link rel="apple-touch-icon" href="icon-192.png" />
   <link rel="icon" href="icon-512.png" />
 
-  <!-- Tailwind + localforage + React (CDN) -->
+  <!-- Tailwind + localforage + React + Supabase SDK -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
+
+  <!-- Supabase (v2) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.33.0/dist/umd/supabase.min.js"></script>
+
+  <!-- React + Babel (for inline JSX) -->
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
   <style>
-    /* minor helper to ensure images don't overflow in some containers */
-    img.responsive { max-width: 100%; height: auto; display:block; }
+    svg { stroke: currentColor; }
+    img.responsive { max-width:100%; height:auto; display:block; }
   </style>
 </head>
 <body class="bg-slate-50">
 
-  <!-- App root -->
   <div id="root"></div>
 
-  <!-- Full app (React + Babel). This file contains:
-       - Login/Signup gate (auth)
-       - Full original WorkProof UI (dashboard, add shift, positions, export, install prompts)
-       - Per-user storage keys for positions/shifts
-       - Upgrade toggle (with comments where to add payment flow)
+  <!--
+    IMPORTANT: Before you deploy, open this file and replace the placeholders below:
+      const SUPABASE_URL = "YOUR_SUPABASE_URL";
+      const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
+
+    And ensure you have created the following tables in your Supabase project:
+      - profiles (id PK uuid, full_name text, mode text) or upsert via auth metadata
+      - positions (id text PK, user_id uuid, name text, created_at timestamp)
+      - shifts (id text PK, user_id uuid, position_id text, date date, start_time text, end_time text, hours numeric, photo_url text, created_at timestamp)
+    Also create a Storage bucket (e.g., 'timecard-photos') to store uploaded photos if you want images saved server-side.
   -->
+
   <script type="text/babel">
-    const { useState, useEffect } = React;
+    const { useState, useEffect, useRef } = React;
 
-    /***********************
-     * Utility helpers
-     ***********************/
-    // localforage wrapper helpers (returns/accepts plain JS objects)
-    async function storageGet(key) {
-      return await localforage.getItem(key);
+    /******************************
+     * CONFIG - INSERT YOUR KEYS
+     ******************************/
+    // Replace these placeholders with your actual Supabase URL and anon public key
+    const supabase = window.supabase;
+
+    /******************************
+     * Helper: localforage wrappers
+     ******************************/
+    async function lfGet(key) {
+      try {
+        return await localforage.getItem(key);
+      } catch (e) {
+        return null;
+      }
     }
-    async function storageSet(key, value) {
-      return await localforage.setItem(key, value);
+    async function lfSet(key, value) {
+      try {
+        await localforage.setItem(key, value);
+      } catch (e) {
+        console.error("localforage set error", e);
+      }
     }
-    async function storageRemove(key) {
-      return await localforage.removeItem(key);
+    async function lfRemove(key) {
+      try {
+        await localforage.removeItem(key);
+      } catch (e) {
+        console.error("localforage remove error", e);
+      }
     }
 
-    /***********************
-     * Small inline icons (kept minimal to match original)
-     ***********************/
-    const IconClock = () => (
-      <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <circle cx="12" cy="12" r="10" strokeWidth="2" stroke="currentColor" fill="none"></circle>
-        <path d="M12 7v6l4 2" strokeWidth="2" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" fill="none"></path>
-      </svg>
-    );
+    /******************************
+     * Small SVG icons (kept inline)
+     ******************************/
+    const Clock = () => (<svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><circle cx="12" cy="12" r="10" strokeWidth="2"></circle><path d="M12 7v5l3 2" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"></path></svg>);
+    const Briefcase = () => (<svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><rect x="2" y="7" width="20" height="14" rx="2" strokeWidth="2"></rect><path d="M16 7V5a2 2 0 0 0-2-2H10a2 2 0 0 0-2 2v2" strokeWidth="2"></path></svg>);
+    const Calendar = () => (<svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><rect x="3" y="4" width="18" height="18" rx="2" strokeWidth="2"></rect><line x1="16" y1="2" x2="16" y2="6" strokeWidth="2"></line><line x1="8" y1="2" x2="8" y2="6" strokeWidth="2"></line><line x1="3" y1="10" x2="21" y2="10" strokeWidth="2"></line></svg>);
+    const Camera = () => (<svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" strokeWidth="2"></path><circle cx="12" cy="13" r="4" strokeWidth="2"></circle></svg>);
 
-    const IconBriefcase = () => (
-      <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <rect x="3" y="7" width="18" height="14" rx="2" strokeWidth="2" stroke="currentColor" fill="none"></rect>
-        <path d="M16 7v-2a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" strokeWidth="2" stroke="currentColor" fill="none"></path>
-      </svg>
-    );
+    /******************************
+     * Sync utilities (local-first, then remote)
+     ******************************/
+    // You can tweak strategies here. For now we:
+    // - write to localforage immediately
+    // - attempt to write to Supabase in background
+    // - when logging in, we fetch remote and merge into local (remote wins on conflicts)
+    async function uploadPhotoToSupabase(user, file) {
+      // NOTE: change bucketName to the bucket you created in Supabase Storage
+      const bucketName = "timecard-photos"; // <-- create this bucket in Supabase
+      if (!file) return null;
+      try {
+        // create a unique path
+        const filename = `${user.id}/${Date.now()}-${file.name}`;
+        // convert base64 dataURL to Blob if necessary
+        let blob = file;
+        if (typeof file === "string" && file.startsWith("data:")) {
+          const res = await fetch(file);
+          blob = await res.blob();
+        }
+        const { data, error } = await supabase.storage.from(bucketName).upload(filename, blob, { cacheControl: "3600", upsert: false });
+        if (error) {
+          console.error("Supabase storage upload error", error);
+          return null;
+        }
+        // Get public URL (if bucket is public) OR create signed URL
+        const { publicURL } = supabase.storage.from(bucketName).getPublicUrl(filename);
+        return publicURL;
+      } catch (e) {
+        console.error("upload error", e);
+        return null;
+      }
+    }
 
-    const IconCalendar = () => (
-      <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <rect x="3" y="4" width="18" height="18" rx="2" strokeWidth="2" stroke="currentColor" fill="none"></rect>
-        <line x1="16" y1="2" x2="16" y2="6" strokeWidth="2" stroke="currentColor"></line>
-        <line x1="8" y1="2" x2="8" y2="6" strokeWidth="2" stroke="currentColor"></line>
-        <line x1="3" y1="10" x2="21" y2="10" strokeWidth="2" stroke="currentColor"></line>
-      </svg>
-    );
+    /******************************
+     * Main App Component
+     ******************************/
+    function WorkProofApp() {
+      // Auth
+      const [authView, setAuthView] = useState("loading"); // loading | login | signup | app
+      const [authForm, setAuthForm] = useState({ email: "", password: "", confirmPassword: "", name: "" });
+      const [authError, setAuthError] = useState("");
+      const [currentUser, setCurrentUser] = useState(null); // supabase user object
 
-    const IconCamera = () => (
-      <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" strokeWidth="2" stroke="currentColor" fill="none"></path>
-        <circle cx="12" cy="13" r="4" strokeWidth="2" stroke="currentColor" fill="none"></circle>
-      </svg>
-    );
-
-    /***********************
-     * Main WorkProof component (auth + app)
-     ***********************/
-    function WorkProof() {
-      // --- Auth state ---
-      const [authView, setAuthView] = useState('loading'); // loading, login, signup, app
-      const [authForm, setAuthForm] = useState({ email: '', password: '', confirmPassword: '', name: '' });
-      const [authError, setAuthError] = useState('');
-      const [currentUser, setCurrentUser] = useState(null);
-
-      // --- App state (original UI states) ---
-      const [mode, setMode] = useState('free'); // free or premium
-      const [view, setView] = useState('dashboard'); // dashboard, add-shift, positions, export
+      // App states (preserve existing app)
+      const [mode, setMode] = useState("free");
+      const [view, setView] = useState("dashboard"); // dashboard, add-shift, positions, export
       const [positions, setPositions] = useState([]);
       const [shifts, setShifts] = useState([]);
-      const [newPosition, setNewPosition] = useState('');
-      const [showInstallPrompt, setShowInstallPrompt] = useState(false);
-      const [deferredPrompt, setDeferredPrompt] = useState(null);
+      const [newPosition, setNewPosition] = useState("");
       const [currentShift, setCurrentShift] = useState({
-        date: new Date().toISOString().split('T')[0],
-        startTime: '',
-        endTime: '',
-        positionId: '',
+        date: new Date().toISOString().split("T")[0],
+        startTime: "",
+        endTime: "",
+        positionId: "",
         timecardPhoto: null,
         photoPreview: null
       });
 
-      // When app starts, check for current-user and load their data if present
+      // PWA install prompt
+      const [showInstallPrompt, setShowInstallPrompt] = useState(false);
+      const [deferredPrompt, setDeferredPrompt] = useState(null);
+
       useEffect(() => {
-        (async () => {
-          const user = await storageGet('current-user');
-          if (user) {
-            setCurrentUser(user);
-            setAuthView('app');
-
-            // load user-specific data
-            const pos = await storageGet(`positions-${user.email}`).catch(()=>null);
-            const sh = await storageGet(`shifts-${user.email}`).catch(()=>null);
-            const md = await storageGet(`mode-${user.email}`).catch(()=>null);
-
-            if (pos) setPositions(pos);
-            if (sh) setShifts(sh);
-            if (md) setMode(md);
-          } else {
-            setAuthView('login');
-          }
-        })();
-      }, []);
-
-      /***********************
-       * PWA: beforeinstallprompt handler
-       ***********************/
-      useEffect(() => {
-        const handler = (e) => {
+        window.addEventListener("beforeinstallprompt", (e) => {
           e.preventDefault();
           setDeferredPrompt(e);
           setShowInstallPrompt(true);
-        };
-        window.addEventListener('beforeinstallprompt', handler);
-        return () => window.removeEventListener('beforeinstallprompt', handler);
+        });
+        return () => { /* no cleanup needed here for inline loader */ };
       }, []);
 
       const handleInstall = async () => {
@@ -158,143 +172,289 @@
         setShowInstallPrompt(false);
       };
 
-      const isInstalled = window.matchMedia('(display-mode: standalone)').matches;
-      const showIOSInstall = () => /iPad|iPhone|iPod/.test(navigator.userAgent) && !isInstalled;
+      // initial boot: check local session or supabase session
+      useEffect(() => {
+        (async () => {
+          // check local cache first
+          const localUser = await lfGet("current-user");
+          if (localUser) {
+            // validate with supabase session (optional)
+            setCurrentUser(localUser);
+            setAuthView("app");
+            await loadUserData(localUser);
+            return;
+          }
+          // if none locally, check supabase session (persisted by supabase)
+          try {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session && session.user) {
+              const user = session.user;
+              // store minimal user locally
+              await lfSet("current-user", user);
+              setCurrentUser(user);
+              setAuthView("app");
+              await loadUserData(user);
+            } else {
+              setAuthView("login");
+            }
+          } catch (e) {
+            console.warn("supabase session check error", e);
+            setAuthView("login");
+          }
+        })();
+      }, []);
 
-      /***********************
-       * AUTH: signup & login (simple, local)
-       * - Stores users under key `user-<email>`
-       * - session key `current-user`
-       * Note: for production, hash passwords or use external auth.
-       ***********************/
+      // Load user-specific data from local then try to fetch remote and merge (remote wins)
+      const loadUserData = async (user) => {
+        // Load local caches
+        const localPositions = await lfGet(`positions-${user.id}`) || [];
+        const localShifts = await lfGet(`shifts-${user.id}`) || [];
+        const localMode = await lfGet(`mode-${user.id}`) || "free";
+
+        setPositions(localPositions);
+        setShifts(localShifts);
+        setMode(localMode);
+
+        // Try to fetch remote and merge
+        try {
+          // fetch positions
+          const { data: remotePositions, error: posErr } = await supabase
+            .from("positions")
+            .select("*")
+            .eq("user_id", user.id);
+
+          // fetch shifts
+          const { data: remoteShifts, error: shiftsErr } = await supabase
+            .from("shifts")
+            .select("*")
+            .eq("user_id", user.id);
+
+          // fetch profile mode if you store it in profiles/enrichment
+          const { data: profiles, error: profileErr } = await supabase
+            .from("profiles")
+            .select("mode")
+            .eq("id", user.id)
+            .maybeSingle();
+
+          // If remote exists, merge (remote authoritative)
+          if (remotePositions) {
+            const normalizedPos = remotePositions.map(r => ({ id: r.id, name: r.name }));
+            setPositions(normalizedPos);
+            await lfSet(`positions-${user.id}`, normalizedPos);
+          }
+          if (remoteShifts) {
+            // convert remote field names to your local format (if different)
+            const normalizedShifts = remoteShifts.map(r => ({
+              id: r.id,
+              date: r.date,
+              startTime: r.start_time,
+              endTime: r.end_time,
+              positionId: r.position_id,
+              hours: Number(r.hours || 0),
+              photoUrl: r.photo_url || null,
+              created_at: r.created_at
+            }));
+            setShifts(normalizedShifts);
+            await lfSet(`shifts-${user.id}`, normalizedShifts);
+          }
+          if (profiles && profiles.mode) {
+            setMode(profiles.mode);
+            await lfSet(`mode-${user.id}`, profiles.mode);
+          }
+        } catch (err) {
+          console.warn("Could not fetch remote data", err);
+          // offline fallback kept
+        }
+      };
+
+      /**********************
+       * AUTH: Supabase methods
+       **********************/
       const handleSignup = async (e) => {
         e.preventDefault();
-        setAuthError('');
-
+        setAuthError("");
         if (!authForm.email || !authForm.password || !authForm.name) {
-          setAuthError('All fields are required');
+          setAuthError("All fields are required.");
           return;
         }
         if (authForm.password !== authForm.confirmPassword) {
-          setAuthError('Passwords do not match');
+          setAuthError("Passwords do not match.");
           return;
         }
 
-        const userKey = `user-${authForm.email.toLowerCase()}`;
-        const existing = await storageGet(userKey).catch(()=>null);
-        if (existing) {
-          setAuthError('An account with this email already exists');
-          return;
+        try {
+          const { data, error } = await supabase.auth.signUp({
+            email: authForm.email,
+            password: authForm.password,
+            options: { data: { full_name: authForm.name } }
+          });
+          if (error) {
+            setAuthError(error.message || "Sign up error");
+            return;
+          }
+          // Supabase may require email confirmation depending on settings.
+          // We will use returned user object if present.
+          const user = data.user;
+          if (!user) {
+            // signed up, but need email confirmation - instruct user
+            setAuthError("Sign-up started. Please confirm your email before continuing (check your inbox).");
+          } else {
+            // Store minimal user locally, initialize empty data, and load app.
+            await lfSet("current-user", user);
+            // initialize empty local structures
+            await lfSet(`positions-${user.id}`, []);
+            await lfSet(`shifts-${user.id}`, []);
+            await lfSet(`mode-${user.id}`, "free");
+            setCurrentUser(user);
+            setAuthView("app");
+            setAuthForm({ email: "", password: "", confirmPassword: "", name: "" });
+            // create a profile row (optional) for mode or other metadata
+            await supabase.from("profiles").upsert({ id: user.id, full_name: authForm.name, mode: "free" });
+          }
+        } catch (err) {
+          console.error("Signup exception", err);
+          setAuthError("Sign up failed. Check console.");
         }
-
-        const newUser = {
-          id: Date.now().toString(),
-          email: authForm.email.toLowerCase(),
-          name: authForm.name,
-          password: authForm.password, // simple for demo — replace with hash in prod
-          createdAt: new Date().toISOString()
-        };
-
-        await storageSet(userKey, newUser);
-        await storageSet('current-user', newUser);
-
-        // initialize empty user data
-        await storageSet(`positions-${newUser.email}`, []);
-        await storageSet(`shifts-${newUser.email}`, []);
-        await storageSet(`mode-${newUser.email}`, 'free');
-
-        // update state
-        setCurrentUser(newUser);
-        setPositions([]);
-        setShifts([]);
-        setMode('free');
-        setAuthForm({ email: '', password: '', confirmPassword: '', name: '' });
-        setAuthView('app');
       };
 
       const handleLogin = async (e) => {
         e.preventDefault();
-        setAuthError('');
-
+        setAuthError("");
         if (!authForm.email || !authForm.password) {
-          setAuthError('Email and password are required');
+          setAuthError("Email and password are required.");
           return;
         }
-
-        const userKey = `user-${authForm.email.toLowerCase()}`;
-        const existing = await storageGet(userKey).catch(()=>null);
-        if (!existing || existing.password !== authForm.password) {
-          setAuthError('Invalid email or password');
-          return;
+        try {
+          const { data, error } = await supabase.auth.signInWithPassword({
+            email: authForm.email,
+            password: authForm.password
+          });
+          if (error) {
+            setAuthError(error.message || "Login failed.");
+            return;
+          }
+          // set user locally
+          const user = data.user;
+          await lfSet("current-user", user);
+          setCurrentUser(user);
+          setAuthForm({ email: "", password: "", confirmPassword: "", name: "" });
+          setAuthView("app");
+          // load data from remote and merge into local
+          await loadUserData(user);
+        } catch (err) {
+          console.error("Login exception", err);
+          setAuthError("Login failed. Check console.");
         }
-
-        // load user data
-        await storageSet('current-user', existing);
-        const pos = await storageGet(`positions-${existing.email}`).catch(()=>null);
-        const sh = await storageGet(`shifts-${existing.email}`).catch(()=>null);
-        const md = await storageGet(`mode-${existing.email}`).catch(()=>null);
-
-        setCurrentUser(existing);
-        setPositions(pos || []);
-        setShifts(sh || []);
-        setMode(md || 'free');
-        setAuthForm({ email: '', password: '', confirmPassword: '', name: '' });
-        setAuthView('app');
       };
 
       const handleLogout = async () => {
-        await storageRemove('current-user');
+        try {
+          await supabase.auth.signOut();
+        } catch (err) {
+          console.warn("supabase signout error", err);
+        }
+        await lfRemove("current-user");
         setCurrentUser(null);
         setPositions([]);
         setShifts([]);
-        setMode('free');
-        setAuthView('login');
+        setMode("free");
+        setAuthView("login");
       };
 
-      /***********************
-       * App storage helpers (per-user)
-       ***********************/
+      /**********************
+       * App save functions: local-first, remote-second
+       **********************/
       const savePositions = async (newPositions) => {
         setPositions(newPositions);
-        if (!currentUser) return;
-        await storageSet(`positions-${currentUser.email}`, newPositions);
-      };
-      const saveShifts = async (newShifts) => {
-        setShifts(newShifts);
-        if (!currentUser) return;
-        await storageSet(`shifts-${currentUser.email}`, newShifts);
-      };
-      const saveMode = async (newMode) => {
-        setMode(newMode);
-        if (!currentUser) return;
-        await storageSet(`mode-${currentUser.email}`, newMode);
+        if (!currentUser) {
+          console.warn("no current user to persist positions");
+          await lfSet("positions-guest", newPositions);
+          return;
+        }
+        // local save
+        await lfSet(`positions-${currentUser.id}`, newPositions);
+
+        // remote save (upsert)
+        try {
+          // Upsert each position into remote table (id must match)
+          const toUpsert = newPositions.map(p => ({ id: p.id, user_id: currentUser.id, name: p.name }));
+          const { error } = await supabase.from("positions").upsert(toUpsert, { onConflict: "id" });
+          if (error) console.error("positions upsert error", error);
+        } catch (err) {
+          console.warn("positions remote save failed, will remain local", err);
+        }
       };
 
-      /***********************
-       * Core app functions (original behavior preserved)
-       ***********************/
+      const saveShifts = async (newShifts) => {
+        setShifts(newShifts);
+        if (!currentUser) {
+          await lfSet("shifts-guest", newShifts);
+          return;
+        }
+        // local save
+        await lfSet(`shifts-${currentUser.id}`, newShifts);
+
+        try {
+          // If shifts contain photoPreview base64 strings, try to upload and replace with photo_url
+          const toUpsert = [];
+          for (const s of newShifts) {
+            let photo_url = s.photoUrl || s.photo_url || null;
+            if (s.photoPreview && s.photoPreview.startsWith("data:")) {
+              const uploadedUrl = await uploadPhotoToSupabase(currentUser, s.photoPreview);
+              if (uploadedUrl) photo_url = uploadedUrl;
+            }
+            toUpsert.push({
+              id: s.id,
+              user_id: currentUser.id,
+              position_id: s.positionId,
+              date: s.date,
+              start_time: s.startTime,
+              end_time: s.endTime,
+              hours: s.hours,
+              photo_url: photo_url
+            });
+          }
+          const { error } = await supabase.from("shifts").upsert(toUpsert, { onConflict: "id" });
+          if (error) console.error("shifts upsert error", error);
+        } catch (err) {
+          console.warn("shifts remote save failed", err);
+        }
+      };
+
+      const saveMode = async (newMode) => {
+        setMode(newMode);
+        if (!currentUser) {
+          await lfSet("mode-guest", newMode);
+          return;
+        }
+        await lfSet(`mode-${currentUser.id}`, newMode);
+        // Save to profiles table (create or update)
+        try {
+          const { error } = await supabase.from("profiles").upsert({ id: currentUser.id, mode: newMode }, { onConflict: "id" });
+          if (error) console.error("saveMode profile error", error);
+        } catch (err) {
+          console.warn("mode save failed", err);
+        }
+      };
+
+      /**********************
+       * App utility functions (preserve original behavior)
+       **********************/
       const addPosition = () => {
         if (newPosition.trim()) {
           const position = { id: Date.now().toString(), name: newPosition.trim() };
           savePositions([...positions, position]);
-          setNewPosition('');
+          setNewPosition("");
         }
       };
+      const deletePosition = (id) => savePositions(positions.filter(p => p.id !== id));
 
-      const deletePosition = (id) => {
-        savePositions(positions.filter(p => p.id !== id));
-      };
-
-      const handlePhotoUpload = (e) => {
+      const handlePhotoInput = (e) => {
         const file = e.target.files[0];
         if (file) {
           const reader = new FileReader();
           reader.onloadend = () => {
-            setCurrentShift({
-              ...currentShift,
-              timecardPhoto: file.name,
-              photoPreview: reader.result
-            });
+            setCurrentShift({ ...currentShift, timecardPhoto: file.name, photoPreview: reader.result });
           };
           reader.readAsDataURL(file);
         }
@@ -302,32 +462,33 @@
 
       const calculateHours = (start, end) => {
         if (!start || !end) return 0;
-        const [sh, sm] = start.split(':').map(Number);
-        const [eh, em] = end.split(':').map(Number);
-        let sM = sh * 60 + sm;
-        let eM = eh * 60 + em;
-        if (eM < sM) eM += 24 * 60;
-        return (eM - sM) / 60;
+        const [sh, sm] = start.split(":").map(Number);
+        const [eh, em] = end.split(":").map(Number);
+        let s = sh * 60 + sm;
+        let e = eh * 60 + em;
+        if (e < s) e += 24 * 60;
+        return (e - s) / 60;
       };
 
-      const addShift = () => {
+      const addShift = async () => {
         if (!currentShift.startTime || !currentShift.endTime || !currentShift.positionId) return;
         const hours = calculateHours(currentShift.startTime, currentShift.endTime);
-        const shift = { id: Date.now().toString(), ...currentShift, hours };
-        saveShifts([...shifts, shift]);
+        const shift = {
+          id: Date.now().toString(),
+          ...currentShift,
+          hours
+        };
+        const newShifts = [...shifts, shift];
+        await saveShifts(newShifts);
         setCurrentShift({
-          date: new Date().toISOString().split('T')[0],
-          startTime: '', endTime: '', positionId: '', timecardPhoto: null, photoPreview: null
+          date: new Date().toISOString().split("T")[0],
+          startTime: "", endTime: "", positionId: "", timecardPhoto: null, photoPreview: null
         });
-        setView('dashboard');
+        setView("dashboard");
       };
 
-      const deleteShift = (id) => {
-        saveShifts(shifts.filter(s => s.id !== id));
-      };
-
+      const deleteShift = (id) => saveShifts(shifts.filter(s => s.id !== id));
       const getTotalHours = () => shifts.reduce((sum, s) => sum + (s.hours || 0), 0).toFixed(1);
-
       const getHoursByPosition = () => {
         const byPos = {};
         shifts.forEach(s => {
@@ -336,43 +497,40 @@
         });
         return byPos;
       };
-
       const getWeeks = () => {
         const weeks = [];
-        const sorted = [...shifts].sort((a,b) => new Date(b.date) - new Date(a.date));
+        const sorted = [...shifts].sort((a, b) => new Date(b.date) - new Date(a.date));
         sorted.forEach(shift => {
           const sd = new Date(shift.date);
           const weekStart = new Date(sd);
           weekStart.setDate(sd.getDate() - sd.getDay());
-          const key = weekStart.toISOString().split('T')[0];
-          let week = weeks.find(w => w.key === key);
-          if (!week) {
-            week = { key, label: weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), shifts: [] };
-            weeks.push(week);
+          const key = weekStart.toISOString().split("T")[0];
+          let w = weeks.find(x => x.key === key);
+          if (!w) {
+            w = { key, label: weekStart.toLocaleDateString("en-US", { month: "short", day: "numeric" }), shifts: [] };
+            weeks.push(w);
           }
-          week.shifts.push(shift);
+          w.shifts.push(shift);
         });
         return weeks;
       };
 
       const weeks = getWeeks();
+      const showIOSInstall = () => /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.matchMedia("(display-mode: standalone)").matches;
 
-      /***********************
-       * UI render:
-       * - If not authenticated => show login/signup
-       * - If authenticated => show full app (original UI)
-       ***********************/
-      if (authView === 'loading') {
+      /**********************
+       * Render UI
+       **********************/
+      if (authView === "loading") {
         return <div className="p-8 text-center text-slate-500">Loading…</div>;
       }
 
-      // --- AUTH SCREENS ---
-      if (authView === 'login' || authView === 'signup') {
+      // AUTH SCREENS
+      if (authView === "login" || authView === "signup") {
         return (
           <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center p-4">
             <div className="max-w-md w-full">
               <div className="text-center mb-8">
-                {/* top-left icon displayed on login as well for consistent branding */}
                 <img src="icon-512.png" alt="WorkProof" className="mx-auto w-20 h-20 rounded-lg shadow-lg mb-4 responsive" />
                 <h1 className="text-4xl font-bold text-slate-900 mb-2">WorkProof</h1>
                 <p className="text-slate-600">Track your work hours professionally</p>
@@ -380,75 +538,60 @@
 
               <div className="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
                 <div className="flex border-b border-slate-200">
-                  <button
-                    onClick={() => { setAuthView('login'); setAuthError(''); setAuthForm({ email: '', password: '', confirmPassword: '', name: '' }); }}
-                    className={`flex-1 py-4 font-semibold transition-colors ${authView === 'login' ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50' : 'text-slate-600 hover:bg-slate-50'}`}
-                  >
-                    Login
-                  </button>
-                  <button
-                    onClick={() => { setAuthView('signup'); setAuthError(''); setAuthForm({ email: '', password: '', confirmPassword: '', name: '' }); }}
-                    className={`flex-1 py-4 font-semibold transition-colors ${authView === 'signup' ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50' : 'text-slate-600 hover:bg-slate-50'}`}
-                  >
-                    Sign Up
-                  </button>
+                  <button onClick={() => { setAuthView("login"); setAuthError(""); setAuthForm({ email: "", password: "", confirmPassword: "", name: "" }); }} className={`flex-1 py-4 font-semibold transition-colors ${authView === "login" ? "text-blue-600 border-b-2 border-blue-600 bg-blue-50" : "text-slate-600 hover:bg-slate-50"}`}>Login</button>
+                  <button onClick={() => { setAuthView("signup"); setAuthError(""); setAuthForm({ email: "", password: "", confirmPassword: "", name: "" }); }} className={`flex-1 py-4 font-semibold transition-colors ${authView === "signup" ? "text-blue-600 border-b-2 border-blue-600 bg-blue-50" : "text-slate-600 hover:bg-slate-50"}`}>Sign Up</button>
                 </div>
 
                 <div className="p-8">
                   {authError && <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4"><p className="text-red-700 text-sm">{authError}</p></div>}
 
-                  <form onSubmit={authView === 'login' ? handleLogin : handleSignup} className="space-y-4">
-                    {authView === 'signup' && (
+                  <form onSubmit={authView === "login" ? handleLogin : handleSignup} className="space-y-4">
+                    {authView === "signup" && (
                       <div>
                         <label className="block text-sm font-medium text-slate-700 mb-2">Full Name</label>
-                        <input type="text" value={authForm.name} onChange={e => setAuthForm({...authForm, name: e.target.value})} placeholder="Your name" className="w-full pl-3 pr-3 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required />
+                        <input type="text" value={authForm.name} onChange={(e)=>setAuthForm({...authForm, name:e.target.value})} placeholder="Your name" className="w-full pl-3 pr-3 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required />
                       </div>
                     )}
 
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-2">Email</label>
-                      <input type="email" value={authForm.email} onChange={e => setAuthForm({...authForm, email: e.target.value})} placeholder="your@email.com" className="w-full pl-3 pr-3 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required />
+                      <input type="email" value={authForm.email} onChange={(e)=>setAuthForm({...authForm, email:e.target.value})} placeholder="you@email.com" className="w-full pl-3 pr-3 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required />
                     </div>
 
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-2">Password</label>
-                      <input type="password" value={authForm.password} onChange={e => setAuthForm({...authForm, password: e.target.value})} placeholder="••••••••" className="w-full pl-3 pr-3 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required />
+                      <input type="password" value={authForm.password} onChange={(e)=>setAuthForm({...authForm, password:e.target.value})} placeholder="••••••••" className="w-full pl-3 pr-3 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required />
                     </div>
 
-                    {authView === 'signup' && (
+                    {authView === "signup" && (
                       <div>
                         <label className="block text-sm font-medium text-slate-700 mb-2">Confirm Password</label>
-                        <input type="password" value={authForm.confirmPassword} onChange={e => setAuthForm({...authForm, confirmPassword: e.target.value})} placeholder="••••••••" className="w-full pl-3 pr-3 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required />
+                        <input type="password" value={authForm.confirmPassword} onChange={(e)=>setAuthForm({...authForm, confirmPassword:e.target.value})} placeholder="••••••••" className="w-full pl-3 pr-3 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required />
                       </div>
                     )}
 
-                    <button type="submit" className="w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white py-3 rounded-lg font-semibold hover:from-blue-700 hover:to-blue-800 transition-all shadow-lg">
-                      {authView === 'login' ? 'Login' : 'Create Account'}
-                    </button>
+                    <button type="submit" className="w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white py-3 rounded-lg font-semibold hover:from-blue-700 hover:to-blue-800 transition-all shadow-lg">{authView === "login" ? "Login" : "Create Account"}</button>
                   </form>
                 </div>
               </div>
 
               <p className="text-center text-sm text-slate-600 mt-6">
-                {authView === 'login' ? "Don't have an account? " : "Already have an account? "}
-                <button onClick={() => setAuthView(authView === 'login' ? 'signup' : 'login')} className="text-blue-600 hover:underline font-medium">
-                  {authView === 'login' ? 'Sign up' : 'Login'}
-                </button>
+                {authView === "login" ? "Don't have an account? " : "Already have an account? "}
+                <button onClick={()=>setAuthView(authView==="login"?"signup":"login")} className="text-blue-600 hover:underline font-medium">{authView === "login" ? "Sign up" : "Login"}</button>
               </p>
             </div>
           </div>
         );
       }
 
-      // --- AUTHENTICATED: show the original app UI below (preserved layout) ---
+      // APPLICATION UI (authenticated)
       return (
         <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
-          {/* Install prompt (kept from original) */}
           {showInstallPrompt && (
             <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-4 py-3 shadow-lg">
               <div className="max-w-6xl mx-auto flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="bg-white/20 p-2 rounded-lg"><IconCalendar /></div>
+                  <div className="bg-white/20 p-2 rounded-lg"><Clock /></div>
                   <div>
                     <p className="font-semibold">Install WorkProof</p>
                     <p className="text-sm text-blue-100">Add to your home screen for easy access</p>
@@ -456,7 +599,7 @@
                 </div>
                 <div className="flex gap-2">
                   <button onClick={handleInstall} className="bg-white text-blue-600 px-4 py-2 rounded-lg font-medium text-sm hover:bg-blue-50 transition-colors">Install</button>
-                  <button onClick={() => setShowInstallPrompt(false)} className="text-white hover:text-blue-100">X</button>
+                  <button onClick={()=>setShowInstallPrompt(false)} className="text-white hover:text-blue-100">X</button>
                 </div>
               </div>
             </div>
@@ -466,7 +609,7 @@
             <div className="bg-gradient-to-r from-purple-600 to-purple-700 text-white px-4 py-3">
               <div className="max-w-6xl mx-auto">
                 <div className="flex items-start gap-3">
-                  <div className="mt-0.5">{/* placeholder share icon */}</div>
+                  <div className="mt-0.5">⇪</div>
                   <div className="text-sm">
                     <p className="font-semibold mb-1">Install on iPhone</p>
                     <p className="text-purple-100">Tap the Share button below, then tap "Add to Home Screen"</p>
@@ -476,48 +619,35 @@
             </div>
           )}
 
-          {/* Header with icon in top-left (kept exactly) */}
           <div className="bg-white shadow-sm border-b border-slate-200">
             <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
               <div className="flex items-center gap-3">
-                {/* Top-left icon image (kept as requested) */}
                 <img src="icon-512.png" alt="WorkProof" className="w-12 h-12 rounded-xl shadow-sm" />
                 <div>
                   <h1 className="text-2xl font-bold text-slate-900">WorkProof</h1>
-                  <p className="text-sm text-slate-500">Welcome, {currentUser?.name}</p>
+                  <p className="text-sm text-slate-500">Welcome, {currentUser?.user_metadata?.full_name || currentUser?.email}</p>
                 </div>
               </div>
 
               <div className="flex items-center gap-3">
-                {/* Upgrade button preserved. It toggles mode between 'free' and 'premium' */}
-                <button
-                  onClick={() => {
-                    // Toggle local premium/free mode (existing behavior)
-                    const newMode = mode === 'free' ? 'premium' : 'free';
-                    saveMode(newMode);
+                <button onClick={()=>{
+                  // toggle mode locally + remote (keeps behavior)
+                  const newMode = mode === "free" ? "premium" : "free";
+                  saveMode(newMode);
 
-                    // If you want to add a payment flow later, hook it here:
-                    //  - Open payment modal / redirect to billing
-                    //  - On success call saveMode('premium') and persist
-                    // Example:
-                    // if (!isPaid) openPaymentModal().then(success => success && saveMode('premium'))
-                  }}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${
-                    mode === 'premium' ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-white shadow-lg' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                  }`}
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M2 8l2 12h16l2-12-6 4-4-8-4 8z" strokeWidth="2" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                  {mode === 'premium' ? 'Premium' : 'Upgrade'}
+                  // COMMENT: Place payment flow here if you add paid subscription.
+                  // Example:
+                  //   openPaymentModal().then(success => success && saveMode('premium'));
+                }} className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${mode === 'premium' ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-white shadow-lg' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}>
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M2 8l2 12h16l2-12-6 4-4-8-4 8z" strokeWidth="2"/></svg>
+                  {mode === "premium" ? "Premium" : "Upgrade"}
                 </button>
 
-                <button onClick={handleLogout} className="flex items-center gap-2 px-4 py-2 rounded-lg font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors">
-                  Logout
-                </button>
+                <button onClick={handleLogout} className="flex items-center gap-2 px-4 py-2 rounded-lg font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors">Logout</button>
               </div>
             </div>
           </div>
 
-          {/* Nav tabs */}
           <div className="bg-white border-b border-slate-200">
             <div className="max-w-6xl mx-auto px-4">
               <div className="flex gap-1 overflow-x-auto">
@@ -527,7 +657,7 @@
                   { id: 'positions', label: 'Positions' },
                   { id: 'export', label: 'Export' }
                 ].map(tab => (
-                  <button key={tab.id} onClick={() => setView(tab.id)} className={`flex items-center gap-2 px-6 py-3 font-medium transition-all whitespace-nowrap ${view === tab.id ? 'text-blue-600 border-b-2 border-blue-600' : 'text-slate-600 hover:text-slate-900'}`}>
+                  <button key={tab.id} onClick={()=>setView(tab.id)} className={`flex items-center gap-2 px-6 py-3 font-medium transition-all whitespace-nowrap ${view===tab.id ? 'text-blue-600 border-b-2 border-blue-600' : 'text-slate-600 hover:text-slate-900'}`}>
                     <span>{tab.label}</span>
                   </button>
                 ))}
@@ -535,10 +665,8 @@
             </div>
           </div>
 
-          {/* Main content */}
           <div className="max-w-6xl mx-auto px-4 py-8 pb-24">
-            {/* DASHBOARD */}
-            {view === 'dashboard' && (
+            {view === "dashboard" && (
               <div className="space-y-6">
                 <div className="grid md:grid-cols-3 gap-4">
                   <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
@@ -547,9 +675,7 @@
                         <p className="text-sm text-slate-600 font-medium">Total Hours</p>
                         <p className="text-3xl font-bold text-slate-900 mt-1">{getTotalHours()}</p>
                       </div>
-                      <div className="bg-blue-100 p-3 rounded-lg">
-                        <IconClock />
-                      </div>
+                      <div className="bg-blue-100 p-3 rounded-lg"><Clock /></div>
                     </div>
                   </div>
 
@@ -559,9 +685,7 @@
                         <p className="text-sm text-slate-600 font-medium">Shifts Logged</p>
                         <p className="text-3xl font-bold text-slate-900 mt-1">{shifts.length}</p>
                       </div>
-                      <div className="bg-green-100 p-3 rounded-lg">
-                        <IconCalendar />
-                      </div>
+                      <div className="bg-green-100 p-3 rounded-lg"><Calendar /></div>
                     </div>
                   </div>
 
@@ -571,9 +695,7 @@
                         <p className="text-sm text-slate-600 font-medium">Positions</p>
                         <p className="text-3xl font-bold text-slate-900 mt-1">{positions.length}</p>
                       </div>
-                      <div className="bg-purple-100 p-3 rounded-lg">
-                        <IconBriefcase />
-                      </div>
+                      <div className="bg-purple-100 p-3 rounded-lg"><Briefcase /></div>
                     </div>
                   </div>
                 </div>
@@ -611,23 +733,16 @@
                                 <div key={shift.id} className="flex items-center justify-between bg-slate-50 rounded-lg p-4">
                                   <div className="flex-1">
                                     <div className="flex items-center gap-3 flex-wrap">
-                                      <div className="bg-blue-100 px-3 py-1 rounded-full">
-                                        <span className="text-sm font-medium text-blue-700">{position?.name}</span>
-                                      </div>
+                                      <div className="bg-blue-100 px-3 py-1 rounded-full"><span className="text-sm font-medium text-blue-700">{position?.name}</span></div>
                                       <span className="text-slate-600 text-sm">{new Date(shift.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
                                     </div>
                                     <div className="flex items-center gap-4 mt-2 text-sm text-slate-600 flex-wrap">
                                       <span>{shift.startTime} - {shift.endTime}</span>
                                       <span className="font-semibold text-slate-900">{(shift.hours || 0).toFixed(1)} hrs</span>
-                                      {shift.timecardPhoto && (
-                                        <span className="flex items-center gap-1 text-green-600">
-                                          <IconCamera />
-                                          Verified
-                                        </span>
-                                      )}
+                                      {shift.photoUrl && <span className="flex items-center gap-1 text-green-600"><Camera />Verified</span>}
                                     </div>
                                   </div>
-                                  <button onClick={() => deleteShift(shift.id)} className="text-slate-400 hover:text-red-600 transition-colors ml-2">X</button>
+                                  <button onClick={()=>deleteShift(shift.id)} className="text-slate-400 hover:text-red-600 transition-colors ml-2">X</button>
                                 </div>
                               );
                             })}
@@ -640,19 +755,16 @@
 
                 {shifts.length === 0 && (
                   <div className="bg-white rounded-xl p-12 text-center shadow-sm border border-slate-200">
-                    <div className="bg-slate-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                      <IconClock />
-                    </div>
+                    <div className="bg-slate-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4"><Clock /></div>
                     <h3 className="text-xl font-semibold text-slate-900 mb-2">No shifts logged yet</h3>
                     <p className="text-slate-600 mb-6">Start tracking your work hours to build your professional record</p>
-                    <button onClick={() => setView('add-shift')} className="bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 transition-colors">Log Your First Shift</button>
+                    <button onClick={()=>setView("add-shift")} className="bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 transition-colors">Log Your First Shift</button>
                   </div>
                 )}
               </div>
             )}
 
-            {/* ADD SHIFT */}
-            {view === 'add-shift' && (
+            {view === "add-shift" && (
               <div className="max-w-2xl mx-auto">
                 <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                   <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-8 text-white">
@@ -661,7 +773,7 @@
                   </div>
 
                   <div className="p-6 space-y-6">
-                    {mode === 'premium' && (
+                    {mode === "premium" && (
                       <div className="bg-gradient-to-r from-amber-50 to-amber-100 border border-amber-200 rounded-lg p-4">
                         <div className="flex items-start gap-3">
                           <div className="text-amber-600 mt-0.5">★</div>
@@ -675,33 +787,33 @@
 
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-2">Date</label>
-                      <input type="date" value={currentShift.date} onChange={e => setCurrentShift({...currentShift, date: e.target.value})} className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                      <input type="date" value={currentShift.date} onChange={e=>setCurrentShift({...currentShift, date: e.target.value})} className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
                     </div>
 
                     <div className="grid md:grid-cols-2 gap-4">
                       <div>
                         <label className="block text-sm font-medium text-slate-700 mb-2">Start Time</label>
-                        <input type="time" value={currentShift.startTime} onChange={e => setCurrentShift({...currentShift, startTime: e.target.value})} className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                        <input type="time" value={currentShift.startTime} onChange={e=>setCurrentShift({...currentShift, startTime: e.target.value})} className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-slate-700 mb-2">End Time</label>
-                        <input type="time" value={currentShift.endTime} onChange={e => setCurrentShift({...currentShift, endTime: e.target.value})} className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                        <input type="time" value={currentShift.endTime} onChange={e=>setCurrentShift({...currentShift, endTime: e.target.value})} className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
                       </div>
                     </div>
 
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-2">Position</label>
-                      <select value={currentShift.positionId} onChange={e => setCurrentShift({...currentShift, positionId: e.target.value})} className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                      <select value={currentShift.positionId} onChange={e=>setCurrentShift({...currentShift, positionId: e.target.value})} className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
                         <option value="">Select a position</option>
                         {positions.map(pos => <option key={pos.id} value={pos.id}>{pos.name}</option>)}
                       </select>
-                      {positions.length === 0 && <p className="text-sm text-slate-600 mt-2">No positions yet. <button onClick={() => setView('positions')} className="text-blue-600 hover:underline">Add one here</button></p>}
+                      {positions.length === 0 && <p className="text-sm text-slate-600 mt-2">No positions yet. <button onClick={()=>setView('positions')} className="text-blue-600 hover:underline">Add one here</button></p>}
                     </div>
 
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-2">Timecard Photo <span className="text-slate-500">(Optional but recommended)</span></label>
                       <div className="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center hover:border-blue-400 transition-colors">
-                        <input type="file" accept="image/*" capture="environment" onChange={handlePhotoUpload} className="hidden" id="photo-upload" />
+                        <input type="file" accept="image/*" capture="environment" onChange={handlePhotoInput} className="hidden" id="photo-upload" />
                         <label htmlFor="photo-upload" className="cursor-pointer">
                           {currentShift.photoPreview ? (
                             <div className="space-y-3">
@@ -710,7 +822,7 @@
                             </div>
                           ) : (
                             <div className="space-y-3">
-                              <div className="mx-auto text-slate-400"><IconCamera /></div>
+                              <div className="mx-auto text-slate-400"><Camera /></div>
                               <div>
                                 <p className="font-medium text-slate-700">Upload timecard photo</p>
                                 <p className="text-sm text-slate-500">Proof for your resume</p>
@@ -722,18 +834,15 @@
                     </div>
 
                     <div className="flex gap-3 pt-4">
-                      <button onClick={addShift} disabled={!currentShift.startTime || !currentShift.endTime || !currentShift.positionId} className="flex-1 bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:bg-slate-300 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-                        Save Shift
-                      </button>
-                      <button onClick={() => setView('dashboard')} className="px-6 py-3 border border-slate-300 rounded-lg font-medium text-slate-700 hover:bg-slate-50 transition-colors">Cancel</button>
+                      <button onClick={addShift} disabled={!currentShift.startTime || !currentShift.endTime || !currentShift.positionId} className="flex-1 bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:bg-slate-300 disabled:cursor-not-allowed flex items-center justify-center gap-2">Save Shift</button>
+                      <button onClick={()=>setView("dashboard")} className="px-6 py-3 border border-slate-300 rounded-lg font-medium text-slate-700 hover:bg-slate-50 transition-colors">Cancel</button>
                     </div>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* POSITIONS */}
-            {view === 'positions' && (
+            {view === "positions" && (
               <div className="max-w-2xl mx-auto">
                 <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                   <div className="bg-gradient-to-r from-purple-600 to-purple-700 px-6 py-8 text-white">
@@ -743,7 +852,7 @@
 
                   <div className="p-6 space-y-6">
                     <div className="flex gap-3">
-                      <input type="text" value={newPosition} onChange={e => setNewPosition(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && addPosition()} placeholder="e.g., Cashier, Grill Cook, Drive-thru" className="flex-1 px-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500" />
+                      <input type="text" value={newPosition} onChange={e=>setNewPosition(e.target.value)} onKeyPress={(e)=>e.key==='Enter' && addPosition()} placeholder="e.g., Cashier, Grill Cook, Drive-thru" className="flex-1 px-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500" />
                       <button onClick={addPosition} className="bg-purple-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-purple-700 transition-colors flex items-center gap-2">Add</button>
                     </div>
 
@@ -752,16 +861,16 @@
                         {positions.map(pos => (
                           <div key={pos.id} className="flex items-center justify-between bg-slate-50 rounded-lg p-4">
                             <div className="flex items-center gap-3">
-                              <div className="bg-purple-100 p-2 rounded-lg"><IconBriefcase /></div>
+                              <div className="bg-purple-100 p-2 rounded-lg"><Briefcase /></div>
                               <span className="font-medium text-slate-900">{pos.name}</span>
                             </div>
-                            <button onClick={() => deletePosition(pos.id)} className="text-slate-400 hover:text-red-600 transition-colors">Delete</button>
+                            <button onClick={()=>deletePosition(pos.id)} className="text-slate-400 hover:text-red-600 transition-colors">Delete</button>
                           </div>
                         ))}
                       </div>
                     ) : (
                       <div className="text-center py-8">
-                        <div className="w-12 h-12 mx-auto text-slate-300 mb-3"><IconBriefcase /></div>
+                        <div className="w-12 h-12 mx-auto text-slate-300 mb-3"><Briefcase /></div>
                         <p className="text-slate-600">No positions added yet</p>
                       </div>
                     )}
@@ -770,8 +879,7 @@
               </div>
             )}
 
-            {/* EXPORT */}
-            {view === 'export' && (
+            {view === "export" && (
               <div className="max-w-2xl mx-auto">
                 <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                   <div className="bg-gradient-to-r from-green-600 to-green-700 px-6 py-8 text-white">
@@ -786,42 +894,40 @@
                       <p><span className="font-medium text-slate-700">Positions:</span> {positions.length}</p>
                     </div>
 
-                    <button onClick={() => {
-                      const summary = `WorkProof Summary for ${currentUser.name}\n\nTotal Hours: ${getTotalHours()}\nShifts Logged: ${shifts.length}\nPositions: ${positions.map(p => p.name).join(', ') || 'None'}\n\nGenerated: ${new Date().toLocaleString()}`;
-                      const blob = new Blob([summary], { type: 'text/plain' });
-                      const link = document.createElement('a');
+                    <button onClick={()=>{
+                      const summary = `WorkProof Summary for ${currentUser?.user_metadata?.full_name || currentUser?.email}\n\nTotal Hours: ${getTotalHours()}\nShifts Logged: ${shifts.length}\nPositions: ${positions.map(p=>p.name).join(", ") || "None"}\n\nGenerated: ${new Date().toLocaleString()}`;
+                      const blob = new Blob([summary], { type: "text/plain" });
+                      const link = document.createElement("a");
                       link.href = URL.createObjectURL(blob);
-                      link.download = 'workproof-summary.txt';
+                      link.download = "workproof-summary.txt";
                       link.click();
                     }} className="bg-green-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-green-700">Download Summary</button>
 
-                    <button onClick={() => {
-                      const summary = `WorkProof Summary for ${currentUser.name}\nTotal Hours: ${getTotalHours()}\nShifts: ${shifts.length}`;
+                    <button onClick={()=>{
+                      const summary = `WorkProof Summary for ${currentUser?.user_metadata?.full_name || currentUser?.email}\nTotal Hours: ${getTotalHours()}\nShifts: ${shifts.length}`;
                       navigator.clipboard.writeText(summary);
-                      alert('Summary copied to clipboard!');
+                      alert("Summary copied to clipboard!");
                     }} className="block text-green-700 underline text-sm hover:text-green-800">Copy to Clipboard</button>
                   </div>
                 </div>
               </div>
             )}
-
           </div>
         </div>
       );
     }
 
-    // Render
-    const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<WorkProof />);
+    // Render app
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<WorkProofApp />);
   </script>
 
-  <!-- Service worker registration preserved for PWA -->
+  <!-- Service worker registration (relative path) -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function() {
         navigator.serviceWorker.register('service-worker.js').then(function(registration) {
-          // Registration successful
-          console.log('ServiceWorker registration successful with scope: ', registration.scope);
+          console.log('ServiceWorker registered with scope: ', registration.scope);
         }, function(err) {
           console.log('ServiceWorker registration failed: ', err);
         });
@@ -830,4 +936,3 @@
   </script>
 </body>
 </html>
-

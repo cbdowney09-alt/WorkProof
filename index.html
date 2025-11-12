@@ -52,26 +52,18 @@
   -->
 
   <script type="text/babel">
-     const SUPABASE_URL = "https://lypnzomzrppvzqiobkcp.supabase.co";
-    const SUPABASE_ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx5cG56b216cnBwdnpxaW9ia2NwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI5NzUxMzAsImV4cCI6MjA3ODU1MTEzMH0.URm48DLZUzxWmAe8n_aHXFjdNZj-z4RWOTSf9G5bnlQ";
-    const { createClient } = window.supabase;
-    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    /******************************
-     * CONFIG - INSERT YOUR KEYS
-     ******************************/
-    // Replace these placeholders with your actual Supabase URL and anon public key
-    
-   
-    
-// ✅ create the Supabase client globally
-    const supabaseJs = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const SUPABASE_URL = "https://lypnzomzrppvzqiobkcp.supabase.co";
+  const SUPABASE_ANON_KEY =
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx5cG56b216cnBwdnpxaW9ia2NwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI5NzUxMzAsImV4cCI6MjA3ODU1MTEzMH0.URm48DLZUzxWmAe8n_aHXFjdNZj-z4RWOTSf9G5bnlQ";
 
-    if (!supabaseJs) {
-  console.error("❌ Supabase failed to initialize — check your script order.");
-} else {
-  console.log("✅ Supabase initialized");
-}
+  // ✅ Create the Supabase client correctly
+  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  if (!supabase) {
+    console.error("❌ Supabase failed to initialize — check your script order.");
+  } else {
+    console.log("✅ Supabase initialized");
+  }
     /******************************
      * Helper: localforage wrappers
      ******************************/
@@ -949,4 +941,5 @@
   </script>
 </body>
 </html>
+
 

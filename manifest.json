@@ -1,5 +1,5 @@
 {
-  "name": "WorkProof - Professional Hours Tracker",
+  "name": "WorkProof",
   "short_name": "WorkProof",
   "description": "Track your work hours with timecard proof for your resume",
   "start_url": "/WorkProof/",
@@ -24,4 +24,5 @@
     }
   ]
 }
+
 
